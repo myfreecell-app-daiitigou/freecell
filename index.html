@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <!-- iPhone画面・PWA用メタタグ -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>FreeCell</title>
+    
+    <!-- iOSホーム画面追加用設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FreeCell">
+    <link rel="apple-touch-icon" href="icon.png">
+    
+    <!-- PWA設定書 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0b5a36">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ゲーム情報 -->
+    <div id="game-status">
+        <div>Game: <span id="game-number">#1</span></div>
+        <div>Time: <span id="game-timer">00:00</span></div>
+        <div>Moves: <span id="move-count">0</span></div>
+    </div>
+
+    <!-- 操作ボタン -->
+    <div id="controls">
+        <button onclick="startNewRandomGame()">New Game</button>
+        <button onclick="selectGameNumber()">Select #</button>
+        <button onclick="undoMove()">Undo</button>
+        <button onclick="redoMove()">Redo</button>
+        <button onclick="giveHint()">Hint</button>
+        <button onclick="triggerAutoComplete()">Auto</button>
+        <button id="sound-btn" onclick="toggleSound()">🔊</button>
+        <button onclick="openStatsModal()">Stats</button>
+    </div>
+
+    <div id="game-board">
+        <!-- 上部エリア -->
+        <div id="top-area">
+            <div id="freecells" class="area"></div>
+            <div id="foundations" class="area"></div>
+        </div>
+        <!-- 下部エリア -->
+        <div id="tableau" class="area"></div>
+    </div>
+
+    <!-- 勝利モーダル -->
+    <div id="win-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>🎉 Congratulations!</h2>
+            <p>ゲームクリアおめでとうございます！</p>
+            <p>タイム: <span id="final-time">00:00</span> / 手数: <span id="final-moves">0</span></p>
+            <button onclick="startNewRandomGame()">Play Again</button>
+        </div>
+    </div>
+
+    <!-- 戦績モーダル -->
+    <div id="stats-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>📊 戦績 (Statistics)</h2>
+            <div class="stats-grid">
+                <div class="stat-item"><span class="stat-label">プレイ数:</span> <span id="stat-played">0</span></div>
+                <div class="stat-item"><span class="stat-label">勝利数:</span> <span id="stat-won">0</span></div>
+                <div class="stat-item"><span class="stat-label">勝率:</span> <span id="stat-winrate">0%</span></div>
+                <div class="stat-item"><span class="stat-label">最短タイム:</span> <span id="stat-best-time">--:--</span></div>
+                <div class="stat-item"><span class="stat-label">最少手数:</span> <span id="stat-fewest-moves">-</span></div>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+                <button onclick="closeStatsModal()">閉じる</button>
+                <button class="danger-btn" onclick="resetAllStats()">データ全消去</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+
+    <!-- ★追加：Service Worker（オフライン化裏方）の登録スクリプト -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => console.log('Service Worker 登録成功:', reg.scope))
+                    .catch((err) => console.log('Service Worker 登録失敗:', err));
+            });
+        }
+    </script>
+</body>
+</html>

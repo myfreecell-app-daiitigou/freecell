@@ -1,0 +1,280 @@
+/* --- カラー変数とiPhone基準のサイズ設定 --- */
+:root {
+    --bg-color: #0b5a36;
+    --card-bg: #ffffff;
+    --text-color: #ffffff;
+    --card-black: #1a1a1a;
+    --card-red: #d32f2f;
+    --btn-bg: #e0e0e0;
+    --btn-text: #222222;
+    --status-bg: rgba(0, 0, 0, 0.3);
+    --modal-bg: #ffffff;
+    --modal-text: #222222;
+    --border-color: rgba(255, 255, 255, 0.25);
+    
+    /* iPhoneの標準的な幅（最大420px）に合わせてカード幅を計算 */
+    --max-board-width: 420px;
+    --board-width: min(calc(100vw - 16px), var(--max-board-width));
+    --card-width: calc((var(--board-width) - 28px) / 8); /* 8列と隙間(4px*7=28px) */
+    --card-height: calc(var(--card-width) * 1.42);
+}
+
+/* ダークモード時の配色 */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #121c16;
+        --card-bg: #f8f9fa;
+        --text-color: #e4e6eb;
+        --card-black: #111111;
+        --card-red: #c62828;
+        --btn-bg: #2d3238;
+        --btn-text: #f0f2f5;
+        --status-bg: rgba(0, 0, 0, 0.5);
+        --modal-bg: #1e232a;
+        --modal-text: #f0f2f5;
+        --border-color: rgba(255, 255, 255, 0.15);
+    }
+}
+
+/* 画面全体の基本設定 */
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    background-color: var(--bg-color);
+    margin: 0;
+    padding: calc(env(safe-area-inset-top, 10px) + 6px) 8px calc(env(safe-area-inset-bottom, 10px) + 10px) 8px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    color: var(--text-color);
+    user-select: none;
+    -webkit-user-select: none;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+}
+
+/* ステータスバー（iPhone幅に固定） */
+#game-status {
+    width: var(--board-width);
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+    background-color: var(--status-bg);
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+/* ボタングループ（iPhone幅に固定） */
+#controls {
+    width: var(--board-width);
+    display: flex;
+    gap: 4px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+button {
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    background-color: var(--btn-bg);
+    color: var(--btn-text);
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+    flex-grow: 1;
+}
+
+button:active {
+    transform: scale(0.94);
+}
+
+button.danger-btn {
+    background-color: #e63946;
+    color: #ffffff;
+}
+
+/* ゲーム盤面（iPhone幅に固定） */
+#game-board {
+    width: var(--board-width);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* 上部エリア（フリーセル 4マス / 組札 4マス） */
+#top-area {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.area {
+    display: flex;
+    gap: 4px;
+}
+
+/* 枠線マス目 */
+.cell {
+    width: var(--card-width);
+    height: var(--card-height);
+    border: 1.5px dashed var(--border-color);
+    border-radius: 5px;
+    position: relative;
+    box-sizing: border-box;
+}
+
+/* 8列の場札列 */
+#tableau {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.column {
+    width: var(--card-width);
+    position: relative;
+    min-height: calc(var(--card-height) * 3);
+}
+
+/* --- カードデザイン --- */
+.card {
+    width: var(--card-width);
+    height: var(--card-height);
+    background-color: var(--card-bg);
+    border: 1px solid #333;
+    border-radius: 5px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    cursor: pointer;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.card.red {
+    color: var(--card-red);
+}
+
+.card.black {
+    color: var(--card-black);
+}
+
+/* ★修正：左上のコーナー表示（ピン留め配置） */
+.card-corner {
+    position: absolute;
+    top: 2px;
+    left: 3px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.0;
+    pointer-events: none;
+}
+
+.card-corner .card-rank {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.card-corner .card-suit-mini {
+    font-size: 10px;
+    margin-top: 1px;
+}
+
+/* ★修正：中央の大きなマーク（完全中央ピン留め） */
+.card-center {
+    position: absolute;
+    top: 55%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 20px;
+    line-height: 1;
+    pointer-events: none;
+}
+
+/* 選択時の黄色ハイライト */
+.card.selected {
+    border: 2.5px solid #ffde00 !important;
+    box-shadow: 0 0 10px #ffde00;
+    transform: scale(1.05);
+    z-index: 150 !important;
+}
+
+/* ヒント時の青色点滅 */
+@keyframes hint-glow {
+    0% { box-shadow: 0 0 4px #00b4d8; border-color: #00b4d8; }
+    50% { box-shadow: 0 0 14px #00b4d8; border-color: #00b4d8; }
+    100% { box-shadow: 0 0 4px #00b4d8; border-color: #00b4d8; }
+}
+
+.hint-highlight {
+    border: 2px solid #00b4d8 !important;
+    animation: hint-glow 0.8s infinite;
+    z-index: 120 !important;
+}
+
+/* モーダルポップアップ */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.75);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background-color: var(--modal-bg);
+    color: var(--modal-text);
+    padding: 24px 20px;
+    border-radius: 14px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    width: 100%;
+    max-width: 320px;
+}
+
+.modal-content h2 {
+    margin: 0 0 12px 0;
+    color: #2a9d8f;
+    font-size: 20px;
+}
+
+.stats-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+    margin: 16px 0;
+    font-size: 15px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+    padding-bottom: 4px;
+}
+
+.stat-label {
+    font-weight: 600;
+}
