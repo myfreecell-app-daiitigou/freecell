@@ -2,83 +2,116 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <!-- iPhone画面・PWA用メタタグ -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>FreeCell</title>
+    <title>ソリティア</title>
     
-    <!-- iOSホーム画面追加用設定 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="FreeCell">
+    <meta name="apple-mobile-web-app-title" content="ソリティア">
     <link rel="apple-touch-icon" href="icon.png">
     
-    <!-- PWA設定書 -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0b5a36">
     
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- ゲーム情報 -->
+    <!-- クリア演出用キャンバス -->
+    <canvas id="confetti-canvas"></canvas>
+
+    <!-- ドラッグ中のカード束を浮かせて追従させるためのコンテナ -->
+    <div id="drag-proxy" class="drag-proxy"></div>
+
+    <!-- ゲーム情報ステータスバー -->
     <div id="game-status">
-        <div>Game: <span id="game-number">#1</span></div>
-        <div>Time: <span id="game-timer">00:00</span></div>
-        <div>Moves: <span id="move-count">0</span></div>
+        <div>モード: <span id="game-mode-display">1枚ドロー</span></div>
+        <div>タイム: <span id="game-timer">00:00</span></div>
+        <div>ムーブ: <span id="move-count">0</span></div>
     </div>
 
-    <!-- 操作ボタン -->
+    <!-- コントロールボタン -->
     <div id="controls">
-        <button onclick="startNewRandomGame()">New Game</button>
-        <button onclick="selectGameNumber()">Select #</button>
-        <button onclick="undoMove()">Undo</button>
-        <button onclick="redoMove()">Redo</button>
-        <button onclick="giveHint()">Hint</button>
-        <button onclick="triggerAutoComplete()">Auto</button>
-        <button id="sound-btn" onclick="toggleSound()">🔊</button>
-        <button onclick="openStatsModal()">Stats</button>
+        <button onclick="openModeSelectModal()">ニューゲーム</button>
+        <button onclick="undoMove()">1手戻す</button>
+        <button onclick="redoMove()">やり直す</button>
+        <button onclick="giveHint()">ヒント</button>
+        <button onclick="triggerAutoComplete()">オート</button>
+        <button id="sound-btn" onclick="toggleSound()">🔊 サウンド</button>
+        <button onclick="openStatsModal()">スコア</button>
     </div>
 
     <div id="game-board">
-        <!-- 上部エリア -->
+        <!-- 上部エリア：組札 ＋ めくり札・山札 -->
         <div id="top-area">
-            <div id="freecells" class="area"></div>
             <div id="foundations" class="area"></div>
+            <div id="stock-waste-area" class="area">
+                <div id="waste-slot" class="cell"></div>
+                <div id="stock-slot" class="cell" onclick="handleStockClick()"></div>
+            </div>
         </div>
-        <!-- 下部エリア -->
+        <!-- 下部エリア：7列のフィールド -->
         <div id="tableau" class="area"></div>
     </div>
 
-    <!-- 勝利モーダル -->
-    <div id="win-modal" class="modal hidden">
+    <!-- モードセレクト ポップアップ -->
+    <div id="mode-modal" class="modal hidden">
         <div class="modal-content">
-            <h2>🎉 Congratulations!</h2>
-            <p>ゲームクリアおめでとうございます！</p>
-            <p>タイム: <span id="final-time">00:00</span> / 手数: <span id="final-moves">0</span></p>
-            <button onclick="startNewRandomGame()">Play Again</button>
+            <h2>ニューゲーム</h2>
+            <p>山札をめくるドロールールを選択してください</p>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+                <button class="big-btn primary-btn" onclick="startNewGameWithMode(1)">🌟 1枚ドロー（イージー・初級）</button>
+                <button class="big-btn secondary-btn" onclick="startNewGameWithMode(3)">🔥 3枚ドロー（ノーマル・標準）</button>
+                <button style="margin-top: 10px;" onclick="closeModeSelectModal()">キャンセル</button>
+            </div>
         </div>
     </div>
 
-    <!-- 戦績モーダル -->
+    <!-- ゲームクリア ポップアップ -->
+    <div id="win-modal" class="modal hidden">
+        <div class="modal-content celebration-content">
+            <h2>🎉 ゲームクリア！ 🎉</h2>
+            <p style="font-size: 16px; font-weight: bold; color: #d32f2f;">すべてのカードがコンプリートされました！</p>
+            <div style="background: rgba(0,0,0,0.05); padding: 12px; border-radius: 8px; margin: 15px 0;">
+                <p>クリアタイム: <span id="final-time" style="font-weight: bold;">00:00</span></p>
+                <p>トータルムーブ: <span id="final-moves" style="font-weight: bold;">0</span> 手</p>
+            </div>
+            <!-- ★修正：クリア画面を確実に閉じて再スタートする専用関数を呼び出す -->
+            <button class="big-btn primary-btn" onclick="restartFromWinModal()">もう一度プレイ！</button>
+        </div>
+    </div>
+
+    <!-- 手詰まり（ゲームオーバー） ポップアップ -->
+    <div id="stalemate-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>⚠️ ゲームオーバー</h2>
+            <p>これ以上動かせる有効なカードがありません。<br>「1手戻す」で前の手をやり直すか、<br>新しいゲームをスタートしてください。</p>
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                <button onclick="closeStalemateModal()">盤面に戻る</button>
+                <button class="primary-btn" onclick="openModeSelectModal()">ニューゲーム</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- プレイデータ（スコア） ポップアップ -->
     <div id="stats-modal" class="modal hidden">
         <div class="modal-content">
-            <h2>📊 戦績 (Statistics)</h2>
+            <h2>📊 プレイデータ</h2>
             <div class="stats-grid">
-                <div class="stat-item"><span class="stat-label">プレイ数:</span> <span id="stat-played">0</span></div>
-                <div class="stat-item"><span class="stat-label">勝利数:</span> <span id="stat-won">0</span></div>
+                <div class="stat-item"><span class="stat-label">トータルプレイ:</span> <span id="stat-played">0</span> 回</div>
+                <div class="stat-item"><span class="stat-label">クリア数:</span> <span id="stat-won">0</span> 回</div>
                 <div class="stat-item"><span class="stat-label">勝率:</span> <span id="stat-winrate">0%</span></div>
-                <div class="stat-item"><span class="stat-label">最短タイム:</span> <span id="stat-best-time">--:--</span></div>
-                <div class="stat-item"><span class="stat-label">最少手数:</span> <span id="stat-fewest-moves">-</span></div>
+                <div class="stat-item"><span class="stat-label">ベストタイム:</span> <span id="stat-best-time">--:--</span></div>
+                <div class="stat-item"><span class="stat-label">最少ムーブ:</span> <span id="stat-fewest-moves">-</span> 手</div>
             </div>
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
                 <button onclick="closeStatsModal()">閉じる</button>
-                <button class="danger-btn" onclick="resetAllStats()">データ全消去</button>
+                <button class="danger-btn" onclick="resetAllStats()">データをリセット</button>
             </div>
         </div>
     </div>
     
     <script src="script.js"></script>
 
-    <!-- ★追加：Service Worker（オフライン化裏方）の登録スクリプト -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
