@@ -64,7 +64,6 @@ body {
     z-index: 2000;
 }
 
-/* ★追加：ドラッグ追従用コンテナ */
 .drag-proxy {
     position: fixed;
     top: 0;
@@ -203,10 +202,9 @@ button.danger-btn {
     cursor: pointer;
     overflow: hidden;
     box-sizing: border-box;
-    touch-action: none; /* ★重要：タッチドラッグ時の画面スクロール誤作動を防止 */
+    touch-action: none;
 }
 
-/* ドラッグ元の半透明化 */
 .card.dragging-source {
     opacity: 0.25;
 }

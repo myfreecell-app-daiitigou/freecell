@@ -16,20 +16,15 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- クリア演出用キャンバス -->
     <canvas id="confetti-canvas"></canvas>
-
-    <!-- ドラッグ中のカード束を浮かせて追従させるためのコンテナ -->
     <div id="drag-proxy" class="drag-proxy"></div>
 
-    <!-- ゲーム情報ステータスバー -->
     <div id="game-status">
         <div>モード: <span id="game-mode-display">1枚ドロー</span></div>
         <div>タイム: <span id="game-timer">00:00</span></div>
         <div>ムーブ: <span id="move-count">0</span></div>
     </div>
 
-    <!-- コントロールボタン -->
     <div id="controls">
         <button onclick="openModeSelectModal()">ニューゲーム</button>
         <button onclick="undoMove()">1手戻す</button>
@@ -41,7 +36,6 @@
     </div>
 
     <div id="game-board">
-        <!-- 上部エリア：組札 ＋ めくり札・山札 -->
         <div id="top-area">
             <div id="foundations" class="area"></div>
             <div id="stock-waste-area" class="area">
@@ -49,11 +43,10 @@
                 <div id="stock-slot" class="cell" onclick="handleStockClick()"></div>
             </div>
         </div>
-        <!-- 下部エリア：7列のフィールド -->
         <div id="tableau" class="area"></div>
     </div>
 
-    <!-- モードセレクト ポップアップ -->
+    <!-- モード選択ポップアップ -->
     <div id="mode-modal" class="modal hidden">
         <div class="modal-content">
             <h2>ニューゲーム</h2>
@@ -66,7 +59,7 @@
         </div>
     </div>
 
-    <!-- ゲームクリア ポップアップ -->
+    <!-- クリア画面 -->
     <div id="win-modal" class="modal hidden">
         <div class="modal-content celebration-content">
             <h2>🎉 ゲームクリア！ 🎉</h2>
@@ -75,12 +68,11 @@
                 <p>クリアタイム: <span id="final-time" style="font-weight: bold;">00:00</span></p>
                 <p>トータルムーブ: <span id="final-moves" style="font-weight: bold;">0</span> 手</p>
             </div>
-            <!-- ★修正：クリア画面を確実に閉じて再スタートする専用関数を呼び出す -->
             <button class="big-btn primary-btn" onclick="restartFromWinModal()">もう一度プレイ！</button>
         </div>
     </div>
 
-    <!-- 手詰まり（ゲームオーバー） ポップアップ -->
+    <!-- 手詰まり画面 -->
     <div id="stalemate-modal" class="modal hidden">
         <div class="modal-content">
             <h2>⚠️ ゲームオーバー</h2>
@@ -92,7 +84,7 @@
         </div>
     </div>
 
-    <!-- プレイデータ（スコア） ポップアップ -->
+    <!-- スコア画面 -->
     <div id="stats-modal" class="modal hidden">
         <div class="modal-content">
             <h2>📊 プレイデータ</h2>

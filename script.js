@@ -593,7 +593,6 @@ function findValidMoves() {
     return moves;
 }
 
-// ★復元・強化：ヒント機能
 function giveHint() {
     if (isGameWon) return;
     const moves = findValidMoves();
@@ -613,7 +612,6 @@ function giveHint() {
     renderBoard();
 }
 
-// ★復元・強化：オート完成機能
 function triggerAutoComplete() {
     if (isGameWon || isAutoCompleting) return;
     isAutoCompleting = true;
@@ -627,7 +625,6 @@ function triggerAutoComplete() {
 
         let moved = false;
 
-        // めくり札 -> 組札
         if (waste.length > 0) {
             let card = waste[waste.length - 1];
             for (let f = 0; f < 4; f++) {
@@ -641,7 +638,6 @@ function triggerAutoComplete() {
             }
         }
 
-        // 場札 -> 組札
         if (!moved) {
             for (let i = 0; i < 7; i++) {
                 if (tableau[i].length > 0) {
@@ -663,7 +659,6 @@ function triggerAutoComplete() {
             }
         }
 
-        // 盤面に裏向きカードがなく、山札・めくり札が残っている場合は自動でめくって進める
         if (!moved) {
             const hasFaceDownOnBoard = tableau.some(col => col.some(c => !c.faceUp));
             if (!hasFaceDownOnBoard && (stock.length > 0 || waste.length > 0)) {
@@ -1034,7 +1029,6 @@ function renderBoard() {
         });
     };
 
-    // 1. 組札 (Foundations)
     const fdContainer = document.getElementById('foundations');
     fdContainer.innerHTML = '';
     for (let i = 0; i < 4; i++) {
@@ -1057,7 +1051,6 @@ function renderBoard() {
         fdContainer.appendChild(cell);
     }
 
-    // 2. めくり札 (Waste)
     const wasteSlot = document.getElementById('waste-slot');
     wasteSlot.innerHTML = '';
     wasteSlot.className = 'cell' + (isHintTarget('waste', 0) ? ' hint-highlight' : '');
@@ -1089,7 +1082,6 @@ function renderBoard() {
         }
     }
 
-    // 3. 山札 (Stock)
     const stockSlot = document.getElementById('stock-slot');
     stockSlot.innerHTML = '';
     if (stock.length > 0) {
@@ -1101,7 +1093,6 @@ function renderBoard() {
         stockSlot.className = 'cell empty';
     }
 
-    // 4. 場札 7列
     const tbContainer = document.getElementById('tableau');
     tbContainer.innerHTML = '';
 
