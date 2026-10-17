@@ -11,31 +11,46 @@
     <link rel="apple-touch-icon" href="icon.png">
     
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0b5a36">
+    <meta name="theme-color" content="#117a4b">
     
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- 全ての視覚エフェクト（火花・花火・トランプの滝・雨）を描画するキャンバス -->
     <canvas id="confetti-canvas"></canvas>
+
+    <!-- クライマックス時のカットインバナー -->
+    <div id="climax-banner" class="climax-banner hidden"></div>
+
+    <!-- ドラッグ追従用コンテナ -->
     <div id="drag-proxy" class="drag-proxy"></div>
 
+    <!-- ゲーム情報ステータスバー -->
     <div id="game-status">
         <div>モード: <span id="game-mode-display">1枚ドロー</span></div>
         <div>タイム: <span id="game-timer">00:00</span></div>
         <div>ムーブ: <span id="move-count">0</span></div>
     </div>
 
+    <!-- ドキドキ進行度ゲージ -->
+    <div id="progress-wrapper">
+        <div id="progress-bar"></div>
+        <span id="progress-text">ゴールまで: 0 / 52枚</span>
+    </div>
+
+    <!-- コントロールボタン -->
     <div id="controls">
         <button onclick="openModeSelectModal()">ニューゲーム</button>
         <button onclick="undoMove()">1手戻す</button>
         <button onclick="redoMove()">やり直す</button>
         <button onclick="giveHint()">ヒント</button>
-        <button onclick="triggerAutoComplete()">オート</button>
+        <button id="auto-btn" onclick="triggerAutoComplete()">オート</button>
         <button id="sound-btn" onclick="toggleSound()">🔊 サウンド</button>
         <button onclick="openStatsModal()">スコア</button>
     </div>
 
     <div id="game-board">
+        <!-- 上部エリア：組札4マス ＋ めくり札・山札 -->
         <div id="top-area">
             <div id="foundations" class="area"></div>
             <div id="stock-waste-area" class="area">
@@ -43,57 +58,65 @@
                 <div id="stock-slot" class="cell" onclick="handleStockClick()"></div>
             </div>
         </div>
+        <!-- 下部エリア：7列のフィールド -->
         <div id="tableau" class="area"></div>
     </div>
 
-    <!-- モード選択ポップアップ -->
+    <!-- モードセレクト ポップアップ -->
     <div id="mode-modal" class="modal hidden">
         <div class="modal-content">
-            <h2>ニューゲーム</h2>
-            <p>山札をめくるドロールールを選択してください</p>
-            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
-                <button class="big-btn primary-btn" onclick="startNewGameWithMode(1)">🌟 1枚ドロー（イージー・初級）</button>
-                <button class="big-btn secondary-btn" onclick="startNewGameWithMode(3)">🔥 3枚ドロー（ノーマル・標準）</button>
-                <button style="margin-top: 10px;" onclick="closeModeSelectModal()">キャンセル</button>
+            <h2>✨ ゲームメニュー ✨</h2>
+            <p>遊び方を選択してください</p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
+                <button class="big-btn primary-btn" onclick="startNewGameWithMode(1)">🌟 1枚ドローで新しく遊ぶ</button>
+                <button class="big-btn secondary-btn" onclick="startNewGameWithMode(3)">🔥 3枚ドローで新しく遊ぶ</button>
+                <button class="big-btn retry-btn" onclick="retryCurrentGame()">🔄 今の配置を最初からやり直す</button>
+                <button style="margin-top: 6px;" onclick="closeModeSelectModal()">キャンセル</button>
             </div>
         </div>
     </div>
 
-    <!-- クリア画面 -->
+    <!-- ゲームクリア ポップアップ -->
     <div id="win-modal" class="modal hidden">
         <div class="modal-content celebration-content">
-            <h2>🎉 ゲームクリア！ 🎉</h2>
-            <p style="font-size: 16px; font-weight: bold; color: #d32f2f;">すべてのカードがコンプリートされました！</p>
-            <div style="background: rgba(0,0,0,0.05); padding: 12px; border-radius: 8px; margin: 15px 0;">
-                <p>クリアタイム: <span id="final-time" style="font-weight: bold;">00:00</span></p>
-                <p>トータルムーブ: <span id="final-moves" style="font-weight: bold;">0</span> 手</p>
+            <div class="crown-icon">👑</div>
+            <h2>🎉 パーフェクトクリア！ 🎉</h2>
+            <div id="new-record-badge" class="record-badge hidden">🏆 新記録達成！</div>
+            <p style="font-size: 15px; font-weight: bold; color: #d32f2f; margin: 6px 0;">すべてのカードがコンプリートされました！</p>
+            <div class="result-box">
+                <p style="margin: 4px 0;">⏱ クリアタイム: <span id="final-time" class="highlight-val">00:00</span></p>
+                <p style="margin: 4px 0;">🃏 トータルムーブ: <span id="final-moves" class="highlight-val">0</span> 手</p>
             </div>
-            <button class="big-btn primary-btn" onclick="restartFromWinModal()">もう一度プレイ！</button>
+            <button class="big-btn primary-btn pulse-btn" onclick="restartFromWinModal()">もう一度プレイ！</button>
         </div>
     </div>
 
-    <!-- 手詰まり画面 -->
+    <!-- 手詰まり（ゲームオーバー） ポップアップ -->
     <div id="stalemate-modal" class="modal hidden">
-        <div class="modal-content">
-            <h2>⚠️ ゲームオーバー</h2>
-            <p>これ以上動かせる有効なカードがありません。<br>「1手戻す」で前の手をやり直すか、<br>新しいゲームをスタートしてください。</p>
-            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-                <button onclick="closeStalemateModal()">盤面に戻る</button>
-                <button class="primary-btn" onclick="openModeSelectModal()">ニューゲーム</button>
+        <div class="modal-content sad-content">
+            <div class="sad-icon">🌧️</div>
+            <h2>😢 ざんねん… 手詰まりです</h2>
+            <p>これ以上動かせるカードがなくなってしまいました。<br>でも大丈夫！1手戻すか、同じ配置でリベンジしよう！</p>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
+                <button class="big-btn retry-btn" onclick="retryCurrentGame()">🔄 この配置を最初からやり直す</button>
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="closeStalemateModal()">盤面に戻る</button>
+                    <button class="primary-btn" onclick="openModeSelectModal()">ニューゲーム</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- スコア画面 -->
+    <!-- プレイデータ（スコア） ポップアップ -->
     <div id="stats-modal" class="modal hidden">
         <div class="modal-content">
             <h2>📊 プレイデータ</h2>
             <div class="stats-grid">
-                <div class="stat-item"><span class="stat-label">トータルプレイ:</span> <span id="stat-played">0</span> 回</div>
-                <div class="stat-item"><span class="stat-label">クリア数:</span> <span id="stat-won">0</span> 回</div>
+                <div class="stat-item"><span class="stat-label">トータルプレイ:</span> <span><span id="stat-played">0</span> 回</span></div>
+                <div class="stat-item"><span class="stat-label">クリア数:</span> <span><span id="stat-won">0</span> 回</span></div>
                 <div class="stat-item"><span class="stat-label">勝率:</span> <span id="stat-winrate">0%</span></div>
                 <div class="stat-item"><span class="stat-label">ベストタイム:</span> <span id="stat-best-time">--:--</span></div>
-                <div class="stat-item"><span class="stat-label">最少ムーブ:</span> <span id="stat-fewest-moves">-</span> 手</div>
+                <div class="stat-item"><span class="stat-label">最少ムーブ:</span> <span><span id="stat-fewest-moves">-</span> 手</span></div>
             </div>
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
                 <button onclick="closeStatsModal()">閉じる</button>

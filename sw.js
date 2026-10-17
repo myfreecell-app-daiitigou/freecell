@@ -1,5 +1,5 @@
-// キャッシュのバージョンを v15 に更新
-const CACHE_NAME = 'solitaire-cache-v15';
+// キャッシュのバージョンを v17 に更新
+const CACHE_NAME = 'solitaire-cache-v17';
 
 const ASSETS_TO_CACHE = [
   './',
