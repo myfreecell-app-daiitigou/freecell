@@ -16,11 +16,14 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- 全ての視覚エフェクト（火花・花火・トランプの滝・雨）を描画するキャンバス -->
+    <!-- 視覚エフェクト（波紋・火花・花火・トランプの滝・雨）を描画するキャンバス -->
     <canvas id="confetti-canvas"></canvas>
 
     <!-- クライマックス時のカットインバナー -->
     <div id="climax-banner" class="climax-banner hidden"></div>
+
+    <!-- コンボ表示用コンテナ -->
+    <div id="combo-container" class="combo-container"></div>
 
     <!-- ドラッグ追従用コンテナ -->
     <div id="drag-proxy" class="drag-proxy"></div>
@@ -49,6 +52,7 @@
         <button onclick="openStatsModal()">スコア</button>
     </div>
 
+    <!-- ゲーム盤面（心音に合わせて拍動する領域） -->
     <div id="game-board">
         <!-- 上部エリア：組札4マス ＋ めくり札・山札 -->
         <div id="top-area">

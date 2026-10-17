@@ -32,10 +32,20 @@ let isAutoCompleting = false;
 let stockCycleCount = 0;
 let movesMadeSinceStockReset = 0;
 
-// ドラマチック演出の状態管理
+// 演出状態管理
 let hasShownNearGoalBanner = false;
 let hasShownClimaxBanner = false;
 let newlyRevealedCardKey = null;
+let justDrewFromStock = false;
+let justCollectedStock = false;
+
+// コンボ管理
+let foundationCombo = 0;
+let lastFoundationTime = 0;
+
+// 心音（Heartbeat）エンジン管理
+let heartbeatTimer = null;
+let currentHeartbeatInterval = 0;
 
 let lastTapTime = 0;
 let lastTapKey = '';
@@ -78,7 +88,7 @@ function unlockAudioEngine() {
 });
 
 // ==========================================
-// ★強化版サウンドシンセサイザー（感情豊かな効果音）
+// ★サウンド＆重低音心音シンセサイザー
 // ==========================================
 function playSound(type, pitchStep = 0) {
     if (!soundEnabled) return;
@@ -118,7 +128,6 @@ function playSound(type, pitchStep = 0) {
             osc.start(now);
             osc.stop(now + 0.05);
         } else if (type === 'reveal') {
-            // 裏カードが新しく表になった時の「キラッ✨」という高音ベル
             [987.77, 1318.51].forEach((freq, idx) => {
                 const o = ctx.createOscillator();
                 const g = ctx.createGain();
@@ -131,8 +140,35 @@ function playSound(type, pitchStep = 0) {
                 o.start(now + idx * 0.05);
                 o.stop(now + idx * 0.05 + 0.18);
             });
+        } else if (type === 'heartbeat') {
+            // ★A案：胸に響くリアルな2段の重低音心音（ドクン…）
+            const intensity = Math.min(1.4, 0.8 + pitchStep * 0.12);
+            // 第1音（Lub）
+            const o1 = ctx.createOscillator();
+            const g1 = ctx.createGain();
+            o1.connect(g1);
+            g1.connect(ctx.destination);
+            o1.type = 'sine';
+            o1.frequency.setValueAtTime(75, now);
+            o1.frequency.exponentialRampToValueAtTime(36, now + 0.12);
+            g1.gain.setValueAtTime(0.45 * intensity, now);
+            g1.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+            o1.start(now);
+            o1.stop(now + 0.13);
+
+            // 第2音（Dub）
+            const o2 = ctx.createOscillator();
+            const g2 = ctx.createGain();
+            o2.connect(g2);
+            g2.connect(ctx.destination);
+            o2.type = 'sine';
+            o2.frequency.setValueAtTime(90, now + 0.14);
+            o2.frequency.exponentialRampToValueAtTime(42, now + 0.25);
+            g2.gain.setValueAtTime(0.35 * intensity, now + 0.14);
+            g2.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+            o2.start(now + 0.14);
+            o2.stop(now + 0.26);
         } else if (type === 'foundation') {
-            // 組札に置いた時、A〜Kまでドレミ音階で上がる爽快なクリスタル音
             const scale = [523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 987.77, 1046.50, 1174.66, 1318.51, 1396.91, 1567.98, 2093.00];
             const freq = scale[Math.min(12, Math.max(0, pitchStep - 1))] || 523.25;
             const osc = ctx.createOscillator();
@@ -147,7 +183,6 @@ function playSound(type, pitchStep = 0) {
             osc.start(now);
             osc.stop(now + 0.14);
 
-            // K(13)が完成した時は豪華なきらめきコードを追加
             if (pitchStep === 13) {
                 [1046.5, 1318.5, 1568.0, 2093.0].forEach((f, i) => {
                     const o = ctx.createOscillator();
@@ -163,7 +198,6 @@ function playSound(type, pitchStep = 0) {
                 });
             }
         } else if (type === 'climax') {
-            // 全ての裏カードが開いた時のハープ風上昇アルペジオ
             const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
             notes.forEach((f, idx) => {
                 const o = ctx.createOscillator();
@@ -178,7 +212,6 @@ function playSound(type, pitchStep = 0) {
                 o.stop(now + idx * 0.06 + 0.3);
             });
         } else if (type === 'win') {
-            // 大勝利ファンファーレ（メロディ＋和音）
             const melody = [
                 { f: 523.25, b: 261.63, d: 0.14 },
                 { f: 659.25, b: 329.63, d: 0.14 },
@@ -204,7 +237,6 @@ function playSound(type, pitchStep = 0) {
                 offset += n.d * 0.88;
             });
         } else if (type === 'firework') {
-            // 花火が弾ける軽快なポンッという音
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.connect(gain);
@@ -217,7 +249,6 @@ function playSound(type, pitchStep = 0) {
             osc.start(now);
             osc.stop(now + 0.12);
         } else if (type === 'lose') {
-            // 手詰まり時の「ワ〜ワ〜ワ〜ン…」という残念な下降音
             const sadNotes = [
                 { fStart: 392.00, fEnd: 380.00, d: 0.28 },
                 { fStart: 369.99, fEnd: 358.00, d: 0.28 },
@@ -241,6 +272,72 @@ function playSound(type, pitchStep = 0) {
             });
         }
     } catch (e) {}
+}
+
+// ==========================================
+// ★心音＆盤面拍動エンジン（徐々に加速する制御）
+// ==========================================
+function updateHeartbeatSystem(faceDownCount) {
+    // クリア済み、オート中、または裏カードが6枚以上・0枚の時は心音を停止
+    const isStalemateOpen = !document.getElementById('stalemate-modal').classList.contains('hidden');
+    if (isGameWon || isAutoCompleting || isStalemateOpen || moveCount === 0 || faceDownCount > 5 || faceDownCount === 0) {
+        stopHeartbeat();
+        return;
+    }
+
+    // 残り枚数（5枚〜1枚）に応じて拍動間隔を短縮（徐々に加速）
+    const intervalMap = {
+        5: 1150, // ゆっくり（ドクン……ドクン……）
+        4: 940,
+        3: 760,
+        2: 600,
+        1: 460   // 最高潮（ドクンドクンドクン！）
+    };
+    const targetInterval = intervalMap[faceDownCount] || 1000;
+    const urgencyLevel = 6 - faceDownCount; // 1〜5
+
+    if (currentHeartbeatInterval !== targetInterval) {
+        stopHeartbeat();
+        currentHeartbeatInterval = targetInterval;
+        triggerSingleHeartbeat(urgencyLevel);
+        heartbeatTimer = setInterval(() => {
+            if (isGameWon || isAutoCompleting || !document.getElementById('stalemate-modal').classList.contains('hidden')) {
+                stopHeartbeat();
+                return;
+            }
+            triggerSingleHeartbeat(urgencyLevel);
+        }, targetInterval);
+    }
+}
+
+function triggerSingleHeartbeat(urgencyLevel) {
+    playSound('heartbeat', urgencyLevel);
+    const board = document.getElementById('game-board');
+    if (board) {
+        board.classList.remove('heartbeat-thump');
+        void board.offsetWidth;
+        board.classList.add('heartbeat-thump');
+    }
+}
+
+function stopHeartbeat() {
+    if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+    }
+    currentHeartbeatInterval = 0;
+    const board = document.getElementById('game-board');
+    if (board) {
+        board.classList.remove('heartbeat-thump');
+    }
+}
+
+// ★③ コンボポップアップ表示
+function showComboPopup(combo) {
+    if (combo < 2) return;
+    const container = document.getElementById('combo-container');
+    if (!container) return;
+    container.innerHTML = `<div class="combo-badge">${combo} COMBO! 🔥</div>`;
 }
 
 function toggleSound() {
@@ -321,14 +418,12 @@ function updateStatusDisplay() {
     document.getElementById('game-timer').innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-// カットインバナー表示
 let bannerTimeout = null;
 function showClimaxBanner(text) {
     const banner = document.getElementById('climax-banner');
     if (!banner) return;
     banner.innerText = text;
     banner.classList.remove('hidden');
-    // アニメーション再トリガー
     banner.style.animation = 'none';
     void banner.offsetWidth;
     banner.style.animation = null;
@@ -343,6 +438,10 @@ function resetDramaStates() {
     hasShownNearGoalBanner = false;
     hasShownClimaxBanner = false;
     newlyRevealedCardKey = null;
+    justDrewFromStock = false;
+    justCollectedStock = false;
+    foundationCombo = 0;
+    stopHeartbeat();
     document.body.classList.remove('near-goal-mode', 'climax-mode', 'gameover-mode');
     stopConfetti();
 }
@@ -430,6 +529,7 @@ function retryCurrentGame() {
 }
 
 function openModeSelectModal() {
+    stopHeartbeat();
     document.getElementById('stalemate-modal').classList.add('hidden');
     document.getElementById('win-modal').classList.add('hidden');
     document.getElementById('mode-modal').classList.remove('hidden');
@@ -437,6 +537,7 @@ function openModeSelectModal() {
 
 function closeModeSelectModal() {
     document.getElementById('mode-modal').classList.add('hidden');
+    renderBoard();
 }
 
 function startNewGameWithMode(mode) {
@@ -487,6 +588,7 @@ function undoMove() {
     restoreState(prevState);
     selectedLocation = null;
     hintLocations = [];
+    foundationCombo = 0;
     closeStalemateModal();
     updateStatusDisplay();
     playSound('move');
@@ -508,6 +610,7 @@ function redoMove() {
     saveCurrentGame();
 }
 
+// 山札クリック（④3枚扇状展開 ＆ ⑤回収アニメーション対応）
 function handleStockClick() {
     if (isGameWon || isAutoCompleting) return;
     startTimerIfNeeded();
@@ -520,16 +623,26 @@ function handleStockClick() {
             card.faceUp = true;
             waste.push(card);
         }
+        justDrewFromStock = true;
         playSound('flip');
     } else {
+        const hadCardsInWaste = waste.length > 0;
         while (waste.length > 0) {
             let card = waste.pop();
             card.faceUp = false;
             stock.push(card);
         }
+        if (hadCardsInWaste) {
+            justCollectedStock = true;
+            triggerStockCollectSparkle();
+        }
         playSound('move');
 
         stockCycleCount++;
+        // 山札を1周しても1枚もカードを動かせなかった場合、即座に手詰まりチェック
+        if (movesMadeSinceStockReset <= 1 && stockCycleCount >= 1) {
+            setTimeout(() => checkStalemateCondition(true), 120);
+        }
         movesMadeSinceStockReset = 0;
     }
     selectedLocation = null;
@@ -538,7 +651,7 @@ function handleStockClick() {
     saveCurrentGame();
 
     if (!isGameWon) {
-        setTimeout(checkStalemateCondition, 100);
+        setTimeout(() => checkStalemateCondition(false), 120);
     }
 }
 
@@ -598,20 +711,25 @@ function tryMove(from, to) {
         if (movingCards.length === 1) {
             let fCol = foundations[to.index];
             let topF = fCol.length > 0 ? fCol[fCol.length - 1] : null;
-            if (topF === null) {
-                if (firstCard.value === 1) {
-                    recordMove();
-                    addCardsTo(to, removeCardsFrom(from, 1));
-                    triggerFoundationSparkle(to.index, firstCard.value === 13);
-                    return 'foundation';
+            if ((topF === null && firstCard.value === 1) || (topF !== null && firstCard.suit === topF.suit && firstCard.value === topF.value + 1)) {
+                recordMove();
+                addCardsTo(to, removeCardsFrom(from, 1));
+
+                // コンボ判定（8秒以内の連続組札送りでコンボ加算）
+                const now = Date.now();
+                if (now - lastFoundationTime < 8000) {
+                    foundationCombo++;
+                } else {
+                    foundationCombo = 1;
                 }
-            } else {
-                if (firstCard.suit === topF.suit && firstCard.value === topF.value + 1) {
-                    recordMove();
-                    addCardsTo(to, removeCardsFrom(from, 1));
-                    triggerFoundationSparkle(to.index, firstCard.value === 13);
-                    return 'foundation';
+                lastFoundationTime = now;
+                if (!isAutoCompleting && foundationCombo >= 2) {
+                    showComboPopup(foundationCombo);
                 }
+
+                triggerFoundationSparkle(to.index, firstCard.value === 13);
+                triggerLandingRipple('foundation', to.index);
+                return 'foundation';
             }
         }
     }
@@ -620,18 +738,12 @@ function tryMove(from, to) {
         let tCol = tableau[to.index];
         let targetCard = tCol.length > 0 ? tCol[tCol.length - 1] : null;
 
-        if (targetCard === null) {
-            if (firstCard.value === 13) {
-                recordMove();
-                addCardsTo(to, removeCardsFrom(from, movingCards.length));
-                return 'tableau';
-            }
-        } else {
-            if (firstCard.color !== targetCard.color && firstCard.value === targetCard.value - 1) {
-                recordMove();
-                addCardsTo(to, removeCardsFrom(from, movingCards.length));
-                return 'tableau';
-            }
+        if ((targetCard === null && firstCard.value === 13) || (targetCard !== null && firstCard.color !== targetCard.color && firstCard.value === targetCard.value - 1)) {
+            recordMove();
+            addCardsTo(to, removeCardsFrom(from, movingCards.length));
+            foundationCombo = 0; // 場札移動時はコンボリセット
+            triggerLandingRipple('tableau', to.index);
+            return 'tableau';
         }
     }
 
@@ -672,7 +784,6 @@ function trySmartMove(fromLoc) {
     return false;
 }
 
-// 数値のカウントアップ演出（クリア画面用）
 function animateResultNumbers(finalSeconds, finalMoves) {
     const timeEl = document.getElementById('final-time');
     const movesEl = document.getElementById('final-moves');
@@ -696,10 +807,11 @@ function checkWinCondition() {
     if (totalInFoundation === 52 && !isGameWon) {
         isGameWon = true;
         stopTimer();
+        stopHeartbeat();
         const isNewRecord = recordWin();
         saveCurrentGame();
         playSound('win');
-        startVictoryShow(); // 花火＋トランプの滝＋紙吹雪の超豪華演出！
+        startVictoryShow();
 
         const badge = document.getElementById('new-record-badge');
         if (isNewRecord) {
@@ -827,15 +939,109 @@ function findValidMoves() {
     return moves;
 }
 
+// ==========================================
+// ★3枚ドロー完全対応：実際に引き出せる山札の厳密シミュレーション
+// ==========================================
+function getActuallyAccessibleStockCards() {
+    let simStock = [...stock];
+    let simWaste = [...waste];
+    let accessible = [];
+    let seenCards = new Set();
+
+    function addTopWaste() {
+        if (simWaste.length > 0) {
+            const top = simWaste[simWaste.length - 1];
+            const key = `${top.suit}-${top.rank}`;
+            if (!seenCards.has(key)) {
+                seenCards.add(key);
+                accessible.push(top);
+            }
+        }
+    }
+
+    addTopWaste();
+
+    // 現在の山札を最後までめくるシミュレーション
+    while (simStock.length > 0) {
+        const c = Math.min(drawCount, simStock.length);
+        for (let i = 0; i < c; i++) {
+            simWaste.push(simStock.pop());
+        }
+        addTopWaste();
+    }
+
+    // 山札を裏返してもう1周分めくるシミュレーション（3枚刻みで実際に出るカードのみ取得）
+    while (simWaste.length > 0) {
+        simStock.push(simWaste.pop());
+    }
+    while (simStock.length > 0) {
+        const c = Math.min(drawCount, simStock.length);
+        for (let i = 0; i < c; i++) {
+            simWaste.push(simStock.pop());
+        }
+        addTopWaste();
+    }
+
+    return accessible;
+}
+
+function checkStalemateCondition(forceOnEmptyCycle = false) {
+    if (isGameWon) return;
+    if (!document.getElementById('stalemate-modal').classList.contains('hidden')) return;
+
+    // 1. 今の盤面ですぐに動かせる意味のある手があるか
+    const immediateMoves = findValidMoves();
+    if (immediateMoves.length > 0) return;
+
+    // 2. 実際に3枚（または1枚）刻みでめくって表に出せるカードの中に、置けるカードがあるか
+    const accessibleCards = getActuallyAccessibleStockCards();
+    let canMoveAnyAccessibleCard = false;
+
+    for (let card of accessibleCards) {
+        for (let f = 0; f < 4; f++) {
+            if (canMoveToFoundationSpecific(card, f)) {
+                canMoveAnyAccessibleCard = true;
+                break;
+            }
+        }
+        if (canMoveAnyAccessibleCard) break;
+
+        for (let t = 0; t < 7; t++) {
+            if (canMoveToTableauSpecific(card, t)) {
+                canMoveAnyAccessibleCard = true;
+                break;
+            }
+        }
+        if (canMoveAnyAccessibleCard) break;
+    }
+
+    // 引き出せるカードが1枚も使えない（または1周回しても全く進展がない）場合は手詰まり確定
+    if (!canMoveAnyAccessibleCard || forceOnEmptyCycle) {
+        if (!canMoveAnyAccessibleCard) {
+            stopHeartbeat();
+            document.body.classList.remove('near-goal-mode', 'climax-mode');
+            document.body.classList.add('gameover-mode');
+            playSound('lose');
+            startSadRainEffect();
+            setTimeout(() => {
+                document.getElementById('stalemate-modal').classList.remove('hidden');
+            }, 550);
+        }
+    }
+}
+
 function giveHint() {
     if (isGameWon) return;
     const moves = findValidMoves();
     if (moves.length === 0) {
+        // 山札をめくっても手がないか先に判定
+        checkStalemateCondition(false);
+        if (!document.getElementById('stalemate-modal').classList.contains('hidden')) {
+            return;
+        }
         if (stock.length > 0 || waste.length > 0) {
             hintLocations = [{ area: 'stock', index: 0 }];
             renderBoard();
-        } else {
-            checkStalemateCondition();
         }
         return;
     }
@@ -849,6 +1055,7 @@ function giveHint() {
 function triggerAutoComplete() {
     if (isGameWon || isAutoCompleting) return;
     isAutoCompleting = true;
+    stopHeartbeat();
     startTimerIfNeeded();
 
     function step() {
@@ -911,45 +1118,6 @@ function triggerAutoComplete() {
     }
 
     step();
-}
-
-// ★手詰まり時のドラマチック残念演出
-function checkStalemateCondition() {
-    if (isGameWon) return;
-    if (!document.getElementById('stalemate-modal').classList.contains('hidden')) return;
-
-    const immediateMoves = findValidMoves();
-    if (immediateMoves.length > 0) return;
-
-    let allRemainingCards = [...stock, ...waste];
-    let canMoveAnyCardInStock = false;
-
-    for (let card of allRemainingCards) {
-        for (let f = 0; f < 4; f++) {
-            if (canMoveToFoundationSpecific(card, f)) {
-                canMoveAnyCardInStock = true; break;
-            }
-        }
-        if (canMoveAnyCardInStock) break;
-
-        for (let t = 0; t < 7; t++) {
-            if (canMoveToTableauSpecific(card, t)) {
-                canMoveAnyCardInStock = true; break;
-            }
-        }
-        if (canMoveAnyCardInStock) break;
-    }
-
-    if (!canMoveAnyCardInStock) {
-        // 画面を揺らし、残念メロディと雨エフェクトを開始
-        document.body.classList.remove('near-goal-mode', 'climax-mode');
-        document.body.classList.add('gameover-mode');
-        playSound('lose');
-        startSadRainEffect();
-        setTimeout(() => {
-            document.getElementById('stalemate-modal').classList.remove('hidden');
-        }, 550);
-    }
 }
 
 function getFaceCardSVG(rank, suit, color) {
@@ -1156,7 +1324,7 @@ function onPointerUp(e) {
         renderBoard();
         
         if (moveResult && !isGameWon) {
-            setTimeout(checkStalemateCondition, 100);
+            setTimeout(() => checkStalemateCondition(false), 120);
         }
     } else {
         const now = Date.now();
@@ -1170,7 +1338,7 @@ function onPointerUp(e) {
             const smartMoved = trySmartMove(dragInfo.from);
             renderBoard();
             if (smartMoved && !isGameWon) {
-                setTimeout(checkStalemateCondition, 100);
+                setTimeout(() => checkStalemateCondition(false), 120);
             }
         } else {
             lastTapTime = now;
@@ -1285,12 +1453,11 @@ function handleAreaClick(area, index, cardIndex = null) {
         renderBoard();
         
         if (moveResult && !isGameWon) {
-            setTimeout(checkStalemateCondition, 100);
+            setTimeout(() => checkStalemateCondition(false), 120);
         }
     }
 }
 
-// ★進行度ゲージ＆クライマックス状態の更新
 function updateDramaAndProgress() {
     const autoBtn = document.getElementById('auto-btn');
     const progBar = document.getElementById('progress-bar');
@@ -1300,7 +1467,9 @@ function updateDramaAndProgress() {
     tableau.forEach(col => col.forEach(c => { if (!c.faceUp) faceDownCount++; }));
     const totalInFoundation = foundations.reduce((sum, col) => sum + col.length, 0);
 
-    // ゲージ更新
+    // 心音＆盤面拍動エンジンの更新
+    updateHeartbeatSystem(faceDownCount);
+
     if (progBar && progText) {
         const pct = Math.round((totalInFoundation / 52) * 100);
         progBar.style.width = `${pct}%`;
@@ -1316,7 +1485,6 @@ function updateDramaAndProgress() {
         }
     }
 
-    // クライマックス演出のトリガー
     if (!isGameWon && moveCount > 0) {
         if (faceDownCount === 0 && totalInFoundation < 52) {
             document.body.classList.remove('near-goal-mode');
@@ -1385,7 +1553,7 @@ function renderBoard() {
         fdContainer.appendChild(cell);
     }
 
-    // 2. めくり札
+    // 2. めくり札（④ 3枚扇状スライド展開対応）
     const wasteSlot = document.getElementById('waste-slot');
     wasteSlot.innerHTML = '';
     wasteSlot.className = 'cell' + (isHintTarget('waste', 0) ? ' hint-highlight' : '');
@@ -1397,18 +1565,24 @@ function renderBoard() {
             const isSelected = selectedLocation && selectedLocation.area === 'waste';
             const isHint = isHintTarget('waste', 0);
             const el = createCardElement(topCard, 0, isSelected, isHint);
+            if (justDrewFromStock) el.classList.add('fan-animate');
             initDragEvents(el, 'waste', 0, 0);
             wasteSlot.appendChild(el);
         } else {
             const countToShow = Math.min(3, waste.length);
             const startIndex = waste.length - countToShow;
+            const angles = countToShow === 3 ? [-6, 0, 6] : (countToShow === 2 ? [-4, 4] : [0]);
             for (let k = startIndex; k < waste.length; k++) {
+                const idxInFan = k - startIndex;
                 const card = waste[k];
                 const isTop = (k === waste.length - 1);
                 const isSelected = isTop && selectedLocation && selectedLocation.area === 'waste';
                 const isHint = isTop && isHintTarget('waste', 0);
                 const el = createCardElement(card, 0, isSelected, isHint);
-                el.style.left = `${(k - startIndex) * 14}px`;
+                el.style.left = `${idxInFan * 14}px`;
+                el.style.setProperty('--fan-angle', `${angles[idxInFan]}deg`);
+                el.classList.add('fan-card');
+                if (justDrewFromStock) el.classList.add('fan-animate');
                 if (isTop) {
                     initDragEvents(el, 'waste', 0, 0);
                 }
@@ -1416,18 +1590,20 @@ function renderBoard() {
             }
         }
     }
+    justDrewFromStock = false;
 
-    // 3. 山札
+    // 3. 山札（⑤ リシャッフル回収アニメーション対応）
     const stockSlot = document.getElementById('stock-slot');
     stockSlot.innerHTML = '';
     if (stock.length > 0) {
         stockSlot.className = 'cell' + (isHintTarget('stock', 0) ? ' hint-highlight' : '');
         const backCard = document.createElement('div');
-        backCard.className = 'card back';
+        backCard.className = 'card back' + (justCollectedStock ? ' stock-collected' : '');
         stockSlot.appendChild(backCard);
     } else {
         stockSlot.className = 'cell empty';
     }
+    justCollectedStock = false;
 
     // 4. 場札 7列
     const tbContainer = document.getElementById('tableau');
@@ -1597,13 +1773,13 @@ function resetAllStats() {
 }
 
 // ==========================================
-// ★統合ビジュアルFXエンジン（スパークル・花火・トランプの滝・雨）
+// ★統合ビジュアルFXエンジン（②着地波紋・スパークル・花火・滝・雨）
 // ==========================================
 let fxAnimationId = null;
-let fxMode = 'none'; // 'sparkle', 'victory', 'rain'
+let fxMode = 'none';
 let sparkles = [];
+let ripples = []; // ② 着地時の波紋リング
 let confettiList = [];
-let fireworks = [];
 let bouncingCards = [];
 let raindrops = [];
 let victoryFrame = 0;
@@ -1617,7 +1793,62 @@ function ensureCanvasSize() {
     return canvas;
 }
 
-// 組札にカードを置いた時のキラキラ・スパークル
+// ★② カード着地時のパルス波紋リング発生
+function triggerLandingRipple(area, index) {
+    setTimeout(() => {
+        let targetEl = null;
+        if (area === 'foundation') {
+            const fCells = document.querySelectorAll('#foundations .cell');
+            targetEl = fCells[index];
+        } else if (area === 'tableau') {
+            const cols = document.querySelectorAll('#tableau .column');
+            if (cols[index]) {
+                const cards = cols[index].querySelectorAll('.card');
+                targetEl = cards.length > 0 ? cards[cards.length - 1] : cols[index];
+            }
+        }
+        if (!targetEl) return;
+
+        const rect = targetEl.getBoundingClientRect();
+        ripples.push({
+            x: rect.left,
+            y: rect.top,
+            w: rect.width,
+            h: rect.height,
+            scale: 1,
+            alpha: 0.9,
+            color: area === 'foundation' ? '#ffea00' : '#ffffff'
+        });
+
+        if (!fxAnimationId) fxLoop();
+    }, 20);
+}
+
+// ⑤ 山札リシャッフル回収時のキラキラ
+function triggerStockCollectSparkle() {
+    const stockSlot = document.getElementById('stock-slot');
+    if (!stockSlot) return;
+    const rect = stockSlot.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    for (let i = 0; i < 14; i++) {
+        const angle = (Math.PI * 2 * i) / 14;
+        const speed = Math.random() * 2.5 + 1.5;
+        sparkles.push({
+            x: cx,
+            y: cy,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size: Math.random() * 3.5 + 2.5,
+            color: '#00f5d4',
+            alpha: 1,
+            decay: 0.035
+        });
+    }
+    if (!fxAnimationId) fxLoop();
+}
+
 function triggerFoundationSparkle(fIndex, isKingComplete = false) {
     const fCells = document.querySelectorAll('#foundations .cell');
     if (!fCells[fIndex]) return;
@@ -1643,12 +1874,9 @@ function triggerFoundationSparkle(fIndex, isKingComplete = false) {
         });
     }
 
-    if (!fxAnimationId) {
-        fxLoop();
-    }
+    if (!fxAnimationId) fxLoop();
 }
 
-// クリア時の超豪華フィナーレ（打ち上げ花火 ＋ バウンドするトランプの滝 ＋ 紙吹雪）
 function startVictoryShow() {
     stopConfetti();
     fxMode = 'victory';
@@ -1656,7 +1884,6 @@ function startVictoryShow() {
     const canvas = ensureCanvasSize();
     const colors = ['#f94144', '#f3722c', '#f8961e', '#ffea00', '#90be6d', '#00f5d4', '#9b5de5', '#f72585'];
 
-    // 紙吹雪とスター
     for (let i = 0; i < 140; i++) {
         confettiList.push({
             x: Math.random() * canvas.width,
@@ -1671,12 +1898,9 @@ function startVictoryShow() {
         });
     }
 
-    if (!fxAnimationId) {
-        fxLoop();
-    }
+    if (!fxAnimationId) fxLoop();
 }
 
-// 手詰まり時の「涙の雨」エフェクト
 function startSadRainEffect() {
     stopConfetti();
     fxMode = 'rain';
@@ -1693,9 +1917,7 @@ function startSadRainEffect() {
         });
     }
 
-    if (!fxAnimationId) {
-        fxLoop();
-    }
+    if (!fxAnimationId) fxLoop();
 }
 
 function spawnFirework(canvas) {
@@ -1742,7 +1964,33 @@ function fxLoop() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. スパークル（星・花火の火花）の描画
+    // ② 着地時の波紋リング描画
+    for (let i = ripples.length - 1; i >= 0; i--) {
+        const r = ripples[i];
+        const expandW = r.w * r.scale;
+        const expandH = r.h * r.scale;
+        const drawX = r.x - (expandW - r.w) / 2;
+        const drawY = r.y - (expandH - r.h) / 2;
+
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, r.alpha);
+        ctx.strokeStyle = r.color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(drawX, drawY, expandW, expandH, 8);
+        } else {
+            ctx.rect(drawX, drawY, expandW, expandH);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        r.scale += 0.035;
+        r.alpha -= 0.055;
+        if (r.alpha <= 0) ripples.splice(i, 1);
+    }
+
+    // スパークル描画
     for (let i = sparkles.length - 1; i >= 0; i--) {
         const s = sparkles[i];
         ctx.save();
@@ -1755,18 +2003,16 @@ function fxLoop() {
 
         s.x += s.vx;
         s.y += s.vy;
-        s.vy += 0.12; // 重力
+        s.vy += 0.12;
         s.alpha -= s.decay;
         if (s.alpha <= 0) sparkles.splice(i, 1);
     }
 
-    // 2. クリア時のフィナーレ演出
     if (fxMode === 'victory') {
         victoryFrame++;
         if (victoryFrame % 38 === 0) spawnFirework(canvas);
         if (victoryFrame % 22 === 0 && bouncingCards.length < 18) spawnBouncingCard(canvas);
 
-        // バウンドするトランプの描画
         for (let i = bouncingCards.length - 1; i >= 0; i--) {
             const c = bouncingCards[i];
             ctx.save();
@@ -1774,7 +2020,11 @@ function fxLoop() {
             ctx.strokeStyle = '#333333';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.roundRect(c.x, c.y, 44, 62, 5);
+            if (ctx.roundRect) {
+                ctx.roundRect(c.x, c.y, 44, 62, 5);
+            } else {
+                ctx.rect(c.x, c.y, 44, 62);
+            }
             ctx.fill();
             ctx.stroke();
 
@@ -1788,9 +2038,8 @@ function fxLoop() {
 
             c.x += c.vx;
             c.y += c.vy;
-            c.vy += 0.45; // 重力
+            c.vy += 0.45;
 
-            // 地面でバウンド
             if (c.y + 62 > canvas.height) {
                 c.y = canvas.height - 62;
                 c.vy = -c.vy * 0.78;
@@ -1801,7 +2050,6 @@ function fxLoop() {
             }
         }
 
-        // 紙吹雪とスターの描画
         confettiList.forEach(p => {
             ctx.save();
             ctx.translate(p.x, p.y);
@@ -1832,7 +2080,6 @@ function fxLoop() {
         });
     }
 
-    // 3. 手詰まり時の「涙の雨」描画
     if (fxMode === 'rain') {
         ctx.strokeStyle = 'rgba(174, 214, 241, 0.55)';
         ctx.lineWidth = 2;
@@ -1850,7 +2097,7 @@ function fxLoop() {
         });
     }
 
-    if (sparkles.length > 0 || fxMode !== 'none') {
+    if (sparkles.length > 0 || ripples.length > 0 || fxMode !== 'none') {
         fxAnimationId = requestAnimationFrame(fxLoop);
     } else {
         fxAnimationId = null;
@@ -1861,8 +2108,8 @@ function fxLoop() {
 function stopConfetti() {
     fxMode = 'none';
     sparkles = [];
+    ripples = [];
     confettiList = [];
-    fireworks = [];
     bouncingCards = [];
     raindrops = [];
     if (fxAnimationId) {
