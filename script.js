@@ -87,9 +87,6 @@ function unlockAudioEngine() {
     window.addEventListener(eventType, unlockAudioEngine, { passive: true });
 });
 
-// ==========================================
-// ★サウンド＆重低音心音シンセサイザー
-// ==========================================
 function playSound(type, pitchStep = 0) {
     if (!soundEnabled) return;
     unlockAudioEngine();
@@ -141,9 +138,7 @@ function playSound(type, pitchStep = 0) {
                 o.stop(now + idx * 0.05 + 0.18);
             });
         } else if (type === 'heartbeat') {
-            // ★A案：胸に響くリアルな2段の重低音心音（ドクン…）
             const intensity = Math.min(1.4, 0.8 + pitchStep * 0.12);
-            // 第1音（Lub）
             const o1 = ctx.createOscillator();
             const g1 = ctx.createGain();
             o1.connect(g1);
@@ -156,7 +151,6 @@ function playSound(type, pitchStep = 0) {
             o1.start(now);
             o1.stop(now + 0.13);
 
-            // 第2音（Dub）
             const o2 = ctx.createOscillator();
             const g2 = ctx.createGain();
             o2.connect(g2);
@@ -274,27 +268,22 @@ function playSound(type, pitchStep = 0) {
     } catch (e) {}
 }
 
-// ==========================================
-// ★心音＆盤面拍動エンジン（徐々に加速する制御）
-// ==========================================
 function updateHeartbeatSystem(faceDownCount) {
-    // クリア済み、オート中、または裏カードが6枚以上・0枚の時は心音を停止
     const isStalemateOpen = !document.getElementById('stalemate-modal').classList.contains('hidden');
     if (isGameWon || isAutoCompleting || isStalemateOpen || moveCount === 0 || faceDownCount > 5 || faceDownCount === 0) {
         stopHeartbeat();
         return;
     }
 
-    // 残り枚数（5枚〜1枚）に応じて拍動間隔を短縮（徐々に加速）
     const intervalMap = {
-        5: 1150, // ゆっくり（ドクン……ドクン……）
+        5: 1150,
         4: 940,
         3: 760,
         2: 600,
-        1: 460   // 最高潮（ドクンドクンドクン！）
+        1: 460
     };
     const targetInterval = intervalMap[faceDownCount] || 1000;
-    const urgencyLevel = 6 - faceDownCount; // 1〜5
+    const urgencyLevel = 6 - faceDownCount;
 
     if (currentHeartbeatInterval !== targetInterval) {
         stopHeartbeat();
@@ -332,7 +321,6 @@ function stopHeartbeat() {
     }
 }
 
-// ★③ コンボポップアップ表示
 function showComboPopup(combo) {
     if (combo < 2) return;
     const container = document.getElementById('combo-container');
@@ -610,7 +598,6 @@ function redoMove() {
     saveCurrentGame();
 }
 
-// 山札クリック（④3枚扇状展開 ＆ ⑤回収アニメーション対応）
 function handleStockClick() {
     if (isGameWon || isAutoCompleting) return;
     startTimerIfNeeded();
@@ -639,10 +626,6 @@ function handleStockClick() {
         playSound('move');
 
         stockCycleCount++;
-        // 山札を1周しても1枚もカードを動かせなかった場合、即座に手詰まりチェック
-        if (movesMadeSinceStockReset <= 1 && stockCycleCount >= 1) {
-            setTimeout(() => checkStalemateCondition(true), 120);
-        }
         movesMadeSinceStockReset = 0;
     }
     selectedLocation = null;
@@ -651,7 +634,7 @@ function handleStockClick() {
     saveCurrentGame();
 
     if (!isGameWon) {
-        setTimeout(() => checkStalemateCondition(false), 120);
+        setTimeout(checkStalemateCondition, 120);
     }
 }
 
@@ -715,7 +698,6 @@ function tryMove(from, to) {
                 recordMove();
                 addCardsTo(to, removeCardsFrom(from, 1));
 
-                // コンボ判定（8秒以内の連続組札送りでコンボ加算）
                 const now = Date.now();
                 if (now - lastFoundationTime < 8000) {
                     foundationCombo++;
@@ -741,7 +723,7 @@ function tryMove(from, to) {
         if ((targetCard === null && firstCard.value === 13) || (targetCard !== null && firstCard.color !== targetCard.color && firstCard.value === targetCard.value - 1)) {
             recordMove();
             addCardsTo(to, removeCardsFrom(from, movingCards.length));
-            foundationCombo = 0; // 場札移動時はコンボリセット
+            foundationCombo = 0;
             triggerLandingRipple('tableau', to.index);
             return 'tableau';
         }
@@ -757,7 +739,7 @@ function trySmartMove(fromLoc) {
 
     if (movingCards.length === 1 && fromLoc.area !== 'foundation') {
         for (let f = 0; f < 4; f++) {
-            if (canMoveToFoundationSpecific(firstCard, f)) {
+            if (canMoveToFoundationOnState(firstCard, f, foundations)) {
                 tryMove(fromLoc, { area: 'foundation', index: f });
                 playSound('foundation', firstCard.value);
                 checkWinCondition();
@@ -769,7 +751,7 @@ function trySmartMove(fromLoc) {
 
     for (let t = 0; t < 7; t++) {
         if (fromLoc.area === 'tableau' && fromLoc.index === t) continue;
-        if (canMoveToTableauSpecific(firstCard, t)) {
+        if (canMoveToTableauOnState(firstCard, t, tableau)) {
             if (fromLoc.area === 'tableau' && fromLoc.cardIndex === 0 && tableau[t].length === 0) {
                 continue;
             }
@@ -825,141 +807,57 @@ function checkWinCondition() {
     }
 }
 
-function canMoveToFoundationSpecific(card, fIndex) {
-    let topF = foundations[fIndex].length > 0 ? foundations[fIndex][foundations[fIndex].length - 1] : null;
+// ==========================================
+// ★新設計：数手先まで読む「先読み探索（BFS）エンジン」
+// （誤判定ゼロの手詰まり検知 ＆ 往復ループしない高精度ヒント）
+// ==========================================
+
+function canMoveToFoundationOnState(card, fIndex, fdState) {
+    let topF = fdState[fIndex].length > 0 ? fdState[fIndex][fdState[fIndex].length - 1] : null;
     if (topF === null) return card.value === 1;
     return card.suit === topF.suit && card.value === topF.value + 1;
 }
 
-function canMoveToTableauSpecific(card, tIndex) {
-    let topT = tableau[tIndex].length > 0 ? tableau[tIndex][tableau[tIndex].length - 1] : null;
+function canMoveToTableauOnState(card, tIndex, tbState) {
+    let topT = tbState[tIndex].length > 0 ? tbState[tIndex][tbState[tIndex].length - 1] : null;
     if (topT === null) return card.value === 13;
     return card.color !== topT.color && card.value === topT.value - 1;
 }
 
-function hasKingWithFaceDown() {
-    for (let i = 0; i < 7; i++) {
-        for (let j = 0; j < tableau[i].length; j++) {
-            let card = tableau[i][j];
-            if (card.faceUp && card.value === 13 && j > 0 && !tableau[i][j - 1].faceUp) {
-                return true;
-            }
-        }
-    }
-    return false;
+function cloneTableauState(tb) {
+    return tb.map(col => col.map(c => ({ ...c })));
 }
 
-function findValidMoves() {
-    let moves = [];
-    
-    if (waste.length > 0) {
-        let card = waste[waste.length - 1];
-        for (let f = 0; f < 4; f++) {
-            if (canMoveToFoundationSpecific(card, f)) {
-                moves.push({ 
-                    from: { area: 'waste', index: 0, cardIndex: 0 }, 
-                    to: { area: 'foundation', index: f, cardIndex: 0 }, 
-                    score: 100 
-                });
-            }
-        }
-    }
-    
-    for (let i = 0; i < 7; i++) {
-        if (tableau[i].length > 0) {
-            let cardIdx = tableau[i].length - 1;
-            let card = tableau[i][cardIdx];
-            if (card.faceUp) {
-                for (let f = 0; f < 4; f++) {
-                    if (canMoveToFoundationSpecific(card, f)) {
-                        moves.push({ 
-                            from: { area: 'tableau', index: i, cardIndex: cardIdx }, 
-                            to: { area: 'foundation', index: f, cardIndex: 0 }, 
-                            score: 100 
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    if (waste.length > 0) {
-        let card = waste[waste.length - 1];
-        for (let t = 0; t < 7; t++) {
-            if (canMoveToTableauSpecific(card, t)) {
-                moves.push({ 
-                    from: { area: 'waste', index: 0, cardIndex: 0 }, 
-                    to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null }, 
-                    score: 60 
-                });
-            }
-        }
-    }
-
-    let hasUsefulKing = hasKingWithFaceDown();
-
-    for (let i = 0; i < 7; i++) {
-        if (tableau[i].length === 0) continue;
-        for (let j = 0; j < tableau[i].length; j++) {
-            let card = tableau[i][j];
-            if (!card.faceUp) continue;
-
-            const hasFaceDownBelow = (j > 0 && !tableau[i][j - 1].faceUp);
-            const isBase = (j === 0);
-
-            for (let t = 0; t < 7; t++) {
-                if (i === t) continue;
-                if (canMoveToTableauSpecific(card, t)) {
-                    let isMeaningful = false;
-                    let score = 0;
-
-                    if (hasFaceDownBelow) {
-                        isMeaningful = true;
-                        score = 80;
-                    } else if (isBase) {
-                        if (card.value !== 13 && hasUsefulKing) {
-                            isMeaningful = true;
-                            score = 40;
-                        }
-                    }
-
-                    if (isMeaningful) {
-                        moves.push({ 
-                            from: { area: 'tableau', index: i, cardIndex: j }, 
-                            to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null }, 
-                            score: score 
-                        });
-                    }
-                }
-            }
-        }
-    }
-    
-    moves.sort((a, b) => b.score - a.score);
-    return moves;
+function cloneFoundationState(fd) {
+    return fd.map(col => col.map(c => ({ ...c })));
 }
 
-// ==========================================
-// ★3枚ドロー完全対応：実際に引き出せる山札の厳密シミュレーション
-// ==========================================
+function getBoardStateHash(tb, fd) {
+    const tStr = tb.map(col => col.map(c => c.faceUp ? `${c.suit}${c.value}` : 'X').join(',')).join('|');
+    const fStr = fd.map(col => col.length).join(',');
+    return `${fStr}#${tStr}`;
+}
+
+// 現在の山札・めくり札から、3枚（または1枚）刻みで実際に一番上に現れるカード群を取得
 function getActuallyAccessibleStockCards() {
     let simStock = [...stock];
     let simWaste = [...waste];
     let accessible = [];
     let seenCards = new Set();
 
-    function addTopWaste() {
+    function recordTopWaste(requiresClick) {
         if (simWaste.length > 0) {
             const top = simWaste[simWaste.length - 1];
             const key = `${top.suit}-${top.rank}`;
             if (!seenCards.has(key)) {
                 seenCards.add(key);
-                accessible.push(top);
+                accessible.push({ card: top, requiresStockClick: requiresClick });
             }
         }
     }
 
-    addTopWaste();
+    // いま見えているめくり札の一番上
+    recordTopWaste(false);
 
     // 現在の山札を最後までめくるシミュレーション
     while (simStock.length > 0) {
@@ -967,10 +865,10 @@ function getActuallyAccessibleStockCards() {
         for (let i = 0; i < c; i++) {
             simWaste.push(simStock.pop());
         }
-        addTopWaste();
+        recordTopWaste(true);
     }
 
-    // 山札を裏返してもう1周分めくるシミュレーション（3枚刻みで実際に出るカードのみ取得）
+    // リセットして先頭からもう1周めくるシミュレーション
     while (simWaste.length > 0) {
         simStock.push(simWaste.pop());
     }
@@ -979,77 +877,355 @@ function getActuallyAccessibleStockCards() {
         for (let i = 0; i < c; i++) {
             simWaste.push(simStock.pop());
         }
-        addTopWaste();
+        recordTopWaste(true);
     }
 
     return accessible;
 }
 
-function checkStalemateCondition(forceOnEmptyCycle = false) {
-    if (isGameWon) return;
-    if (!document.getElementById('stalemate-modal').classList.contains('hidden')) return;
-
-    // 1. 今の盤面ですぐに動かせる意味のある手があるか
-    const immediateMoves = findValidMoves();
-    if (immediateMoves.length > 0) return;
-
-    // 2. 実際に3枚（または1枚）刻みでめくって表に出せるカードの中に、置けるカードがあるか
-    const accessibleCards = getActuallyAccessibleStockCards();
-    let canMoveAnyAccessibleCard = false;
-
-    for (let card of accessibleCards) {
+// 指定した仮想盤面において、山札の引けるカード群のうちどれか1枚でも置けるか判定
+function canPlaceAnyAccessibleCard(tbState, fdState, accessibleCards) {
+    for (let item of accessibleCards) {
+        const card = item.card;
         for (let f = 0; f < 4; f++) {
-            if (canMoveToFoundationSpecific(card, f)) {
-                canMoveAnyAccessibleCard = true;
-                break;
+            if (canMoveToFoundationOnState(card, f, fdState)) {
+                return item;
             }
         }
-        if (canMoveAnyAccessibleCard) break;
-
         for (let t = 0; t < 7; t++) {
-            if (canMoveToTableauSpecific(card, t)) {
-                canMoveAnyAccessibleCard = true;
-                break;
+            if (canMoveToTableauOnState(card, t, tbState)) {
+                return item;
             }
         }
-        if (canMoveAnyAccessibleCard) break;
+    }
+    return null;
+}
+
+// ★コア関数：現在の盤面から「前進（裏カード開放・組札増加・山札カード展開）」につながる最善の1手を探索する
+function findBestProgressAction() {
+    // 1. まず1手で即座に「組札送り」「めくり札出し」「裏カード開放」ができる直接手をチェック
+    let directMoves = [];
+
+    // めくり札 -> 組札
+    if (waste.length > 0) {
+        let card = waste[waste.length - 1];
+        for (let f = 0; f < 4; f++) {
+            if (canMoveToFoundationOnState(card, f, foundations)) {
+                directMoves.push({
+                    type: 'move',
+                    from: { area: 'waste', index: 0, cardIndex: 0 },
+                    to: { area: 'foundation', index: f, cardIndex: 0 },
+                    score: 100
+                });
+            }
+        }
     }
 
-    // 引き出せるカードが1枚も使えない（または1周回しても全く進展がない）場合は手詰まり確定
-    if (!canMoveAnyAccessibleCard || forceOnEmptyCycle) {
-        if (!canMoveAnyAccessibleCard) {
-            stopHeartbeat();
-            document.body.classList.remove('near-goal-mode', 'climax-mode');
-            document.body.classList.add('gameover-mode');
-            playSound('lose');
-            startSadRainEffect();
-            setTimeout(() => {
-                document.getElementById('stalemate-modal').classList.remove('hidden');
-            }, 550);
+    // 場札 -> 組札
+    for (let i = 0; i < 7; i++) {
+        if (tableau[i].length > 0) {
+            let cardIdx = tableau[i].length - 1;
+            let card = tableau[i][cardIdx];
+            if (card.faceUp) {
+                for (let f = 0; f < 4; f++) {
+                    if (canMoveToFoundationOnState(card, f, foundations)) {
+                        directMoves.push({
+                            type: 'move',
+                            from: { area: 'tableau', index: i, cardIndex: cardIdx },
+                            to: { area: 'foundation', index: f, cardIndex: 0 },
+                            score: 95
+                        });
+                    }
+                }
+            }
         }
+    }
+
+    // 場札 -> 場札（すぐ下の裏カードが直接めくれる移動）
+    for (let i = 0; i < 7; i++) {
+        for (let j = 1; j < tableau[i].length; j++) {
+            let card = tableau[i][j];
+            if (card.faceUp && !tableau[i][j - 1].faceUp) {
+                for (let t = 0; t < 7; t++) {
+                    if (i === t) continue;
+                    if (canMoveToTableauOnState(card, t, tableau)) {
+                        directMoves.push({
+                            type: 'move',
+                            from: { area: 'tableau', index: i, cardIndex: j },
+                            to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null },
+                            score: 90
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // めくり札 -> 場札
+    if (waste.length > 0) {
+        let card = waste[waste.length - 1];
+        for (let t = 0; t < 7; t++) {
+            if (canMoveToTableauOnState(card, t, tableau)) {
+                directMoves.push({
+                    type: 'move',
+                    from: { area: 'waste', index: 0, cardIndex: 0 },
+                    to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null },
+                    score: 80
+                });
+            }
+        }
+    }
+
+    if (directMoves.length > 0) {
+        directMoves.sort((a, b) => b.score - a.score);
+        return directMoves[0];
+    }
+
+    // 2. 直接手がない場合：先読み探索（BFS）で「2手〜6手先の打開ルート（中継手）」を探す
+    const accessibleCards = getActuallyAccessibleStockCards();
+    const initFoundationTotal = foundations.reduce((s, c) => s + c.length, 0);
+
+    // 訪問済み盤面セット（過去のゲーム履歴の盤面も登録し、往復ループ・千日手を完全ブロック）
+    const visited = new Set();
+    visited.add(getBoardStateHash(tableau, foundations));
+    const historyCheckStart = Math.max(0, historyStack.length - 12);
+    for (let h = historyCheckStart; h < historyStack.length; h++) {
+        try {
+            const past = JSON.parse(historyStack[h]);
+            if (past.tableau && past.foundations) {
+                visited.add(getBoardStateHash(past.tableau, past.foundations));
+            }
+        } catch (e) {}
+    }
+
+    let queue = [{
+        tb: cloneTableauState(tableau),
+        fd: cloneFoundationState(foundations),
+        firstMove: null,
+        depth: 0
+    }];
+
+    const MAX_STATES = 700;
+    const MAX_DEPTH = 6;
+    let statesChecked = 0;
+
+    while (queue.length > 0 && statesChecked < MAX_STATES) {
+        const curr = queue.shift();
+        statesChecked++;
+
+        if (curr.depth >= MAX_DEPTH) continue;
+
+        // (A) 場札間のあらゆる合法移動（途中の表カード切り離し・空き列作成を含む）を試す
+        for (let i = 0; i < 7; i++) {
+            const col = curr.tb[i];
+            if (col.length === 0) continue;
+
+            for (let j = 0; j < col.length; j++) {
+                const card = col[j];
+                if (!card.faceUp) continue;
+
+                for (let t = 0; t < 7; t++) {
+                    if (i === t) continue;
+                    // 空き列にあるKを別の空き列へ移すだけの無意味な移動は除外
+                    if (j === 0 && card.value === 13 && curr.tb[t].length === 0) continue;
+
+                    if (canMoveToTableauOnState(card, t, curr.tb)) {
+                        const nextTb = cloneTableauState(curr.tb);
+                        const nextFd = cloneFoundationState(curr.fd);
+                        const moving = nextTb[i].splice(j);
+                        nextTb[t].push(...moving);
+
+                        let revealedFaceDown = false;
+                        if (nextTb[i].length > 0 && !nextTb[i][nextTb[i].length - 1].faceUp) {
+                            nextTb[i][nextTb[i].length - 1].faceUp = true;
+                            revealedFaceDown = true;
+                        }
+
+                        const moveRecord = curr.firstMove || {
+                            type: 'move',
+                            from: { area: 'tableau', index: i, cardIndex: j },
+                            to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null }
+                        };
+
+                        // 前進チェック①：裏カードが新しくめくれた！
+                        if (revealedFaceDown) {
+                            return moveRecord;
+                        }
+
+                        // 前進チェック②：どかした下から出てきたカードが組札へ送れるようになった！
+                        const currentFdTotal = nextFd.reduce((s, c) => s + c.length, 0);
+                        if (nextTb[i].length > 0 && currentFdTotal >= initFoundationTotal) {
+                            const exposed = nextTb[i][nextTb[i].length - 1];
+                            for (let f = 0; f < 4; f++) {
+                                if (canMoveToFoundationOnState(exposed, f, nextFd)) {
+                                    return moveRecord;
+                                }
+                            }
+                        }
+
+                        // 前進チェック③：この組み替えによって、山札・めくり札のカードが場に出せるようになった！（例：空き列に山札のKを出せる等）
+                        if (canPlaceAnyAccessibleCard(nextTb, nextFd, accessibleCards)) {
+                            // 初期盤面では山札が出せなかったのに、この組み替えで出せるようになったならこの組み替えが正解！
+                            if (!canPlaceAnyAccessibleCard(curr.tb, curr.fd, accessibleCards)) {
+                                return moveRecord;
+                            }
+                        }
+
+                        const hash = getBoardStateHash(nextTb, nextFd);
+                        if (!visited.has(hash)) {
+                            visited.add(hash);
+                            queue.push({
+                                tb: nextTb,
+                                fd: nextFd,
+                                firstMove: moveRecord,
+                                depth: curr.depth + 1
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // (B) 露出したカードを組札に上げる手も枝として展開（2手先で組札が増えるルートの検出）
+        for (let i = 0; i < 7; i++) {
+            const col = curr.tb[i];
+            if (col.length === 0) continue;
+            const topCard = col[col.length - 1];
+            if (!topCard.faceUp) continue;
+
+            for (let f = 0; f < 4; f++) {
+                if (canMoveToFoundationOnState(topCard, f, curr.fd)) {
+                    const nextTb = cloneTableauState(curr.tb);
+                    const nextFd = cloneFoundationState(curr.fd);
+                    const c = nextTb[i].pop();
+                    nextFd[f].push(c);
+
+                    let revealed = false;
+                    if (nextTb[i].length > 0 && !nextTb[i][nextTb[i].length - 1].faceUp) {
+                        nextTb[i][nextTb[i].length - 1].faceUp = true;
+                        revealed = true;
+                    }
+
+                    const moveRecord = curr.firstMove || {
+                        type: 'move',
+                        from: { area: 'tableau', index: i, cardIndex: col.length - 1 },
+                        to: { area: 'foundation', index: f, cardIndex: 0 }
+                    };
+
+                    const newFdTotal = nextFd.reduce((s, colF) => s + colF.length, 0);
+                    if (revealed || newFdTotal > initFoundationTotal) {
+                        return moveRecord;
+                    }
+
+                    const hash = getBoardStateHash(nextTb, nextFd);
+                    if (!visited.has(hash)) {
+                        visited.add(hash);
+                        queue.push({
+                            tb: nextTb,
+                            fd: nextFd,
+                            firstMove: moveRecord,
+                            depth: curr.depth + 1
+                        });
+                    }
+                }
+            }
+        }
+
+        // (C) 組札から場札へ1枚戻して足場を作る高等テクニックの探索（深さ0のときのみ許可）
+        if (curr.depth === 0) {
+            for (let f = 0; f < 4; f++) {
+                if (curr.fd[f].length <= 1) continue; // Aは戻さない
+                const topF = curr.fd[f][curr.fd[f].length - 1];
+                for (let t = 0; t < 7; t++) {
+                    if (canMoveToTableauOnState(topF, t, curr.tb)) {
+                        const nextTb = cloneTableauState(curr.tb);
+                        const nextFd = cloneFoundationState(curr.fd);
+                        const c = nextFd[f].pop();
+                        nextTb[t].push(c);
+
+                        const moveRecord = {
+                            type: 'move',
+                            from: { area: 'foundation', index: f, cardIndex: 0 },
+                            to: { area: 'tableau', index: t, cardIndex: tableau[t].length > 0 ? tableau[t].length - 1 : null }
+                        };
+
+                        // 組札から戻した結果、山札のカードがそこに乗せられるようになるなら有効
+                        if (!canPlaceAnyAccessibleCard(curr.tb, curr.fd, accessibleCards) &&
+                            canPlaceAnyAccessibleCard(nextTb, nextFd, accessibleCards)) {
+                            return moveRecord;
+                        }
+
+                        const hash = getBoardStateHash(nextTb, nextFd);
+                        if (!visited.has(hash)) {
+                            visited.add(hash);
+                            queue.push({
+                                tb: nextTb,
+                                fd: nextFd,
+                                firstMove: moveRecord,
+                                depth: curr.depth + 1
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 盤面を動かさなくても、山札をめくっていけば出せるカードがあるかチェック
+    const stockPlaceable = canPlaceAnyAccessibleCard(tableau, foundations, accessibleCards);
+    if (stockPlaceable) {
+        return { type: 'draw_stock' };
+    }
+
+    // 探索上限に達した場合は安全のため手詰まり扱いにしない
+    if (statesChecked >= MAX_STATES) {
+        return { type: 'complex_unknown' };
+    }
+
+    // 4. どの手順・どの山札めくりを試しても前進できない＝100%完全な手詰まり
+    return null;
+}
+
+function checkStalemateCondition() {
+    if (isGameWon || isAutoCompleting) return;
+    if (!document.getElementById('stalemate-modal').classList.contains('hidden')) return;
+
+    const progressAction = findBestProgressAction();
+
+    // 前進できる手が1つも存在しない場合のみ、手詰まり（ゲームオーバー）を発動
+    if (progressAction === null) {
+        stopHeartbeat();
+        document.body.classList.remove('near-goal-mode', 'climax-mode');
+        document.body.classList.add('gameover-mode');
+        playSound('lose');
+        startSadRainEffect();
+        setTimeout(() => {
+            document.getElementById('stalemate-modal').classList.remove('hidden');
+        }, 550);
     }
 }
 
 function giveHint() {
     if (isGameWon) return;
-    const moves = findValidMoves();
-    if (moves.length === 0) {
-        // 山札をめくっても手がないか先に判定
-        checkStalemateCondition(false);
-        if (!document.getElementById('stalemate-modal').classList.contains('hidden')) {
-            return;
-        }
-        if (stock.length > 0 || waste.length > 0) {
-            hintLocations = [{ area: 'stock', index: 0 }];
-            renderBoard();
-        }
+    const action = findBestProgressAction();
+
+    if (action === null) {
+        checkStalemateCondition();
         return;
     }
-    const best = moves[0];
-    const fromLoc = { ...best.from, isDestination: false };
-    const toLoc = { ...best.to, isDestination: true };
-    hintLocations = [fromLoc, toLoc];
-    renderBoard();
+
+    if (action.type === 'draw_stock') {
+        hintLocations = [{ area: 'stock', index: 0 }];
+        renderBoard();
+        return;
+    }
+
+    if (action.type === 'move') {
+        const fromLoc = { ...action.from, isDestination: false };
+        const toLoc = { ...action.to, isDestination: true };
+        hintLocations = [fromLoc, toLoc];
+        renderBoard();
+    }
 }
 
 function triggerAutoComplete() {
@@ -1069,7 +1245,7 @@ function triggerAutoComplete() {
         if (waste.length > 0) {
             let card = waste[waste.length - 1];
             for (let f = 0; f < 4; f++) {
-                if (canMoveToFoundationSpecific(card, f)) {
+                if (canMoveToFoundationOnState(card, f, foundations)) {
                     tryMove({ area: 'waste', index: 0, cardIndex: 0 }, { area: 'foundation', index: f });
                     playSound('foundation', card.value);
                     renderBoard();
@@ -1086,7 +1262,7 @@ function triggerAutoComplete() {
                     let card = tableau[i][cardIdx];
                     if (card.faceUp) {
                         for (let f = 0; f < 4; f++) {
-                            if (canMoveToFoundationSpecific(card, f)) {
+                            if (canMoveToFoundationOnState(card, f, foundations)) {
                                 tryMove({ area: 'tableau', index: i, cardIndex: cardIdx }, { area: 'foundation', index: f });
                                 playSound('foundation', card.value);
                                 renderBoard();
@@ -1324,7 +1500,7 @@ function onPointerUp(e) {
         renderBoard();
         
         if (moveResult && !isGameWon) {
-            setTimeout(() => checkStalemateCondition(false), 120);
+            setTimeout(checkStalemateCondition, 120);
         }
     } else {
         const now = Date.now();
@@ -1338,7 +1514,7 @@ function onPointerUp(e) {
             const smartMoved = trySmartMove(dragInfo.from);
             renderBoard();
             if (smartMoved && !isGameWon) {
-                setTimeout(() => checkStalemateCondition(false), 120);
+                setTimeout(checkStalemateCondition, 120);
             }
         } else {
             lastTapTime = now;
@@ -1453,7 +1629,7 @@ function handleAreaClick(area, index, cardIndex = null) {
         renderBoard();
         
         if (moveResult && !isGameWon) {
-            setTimeout(() => checkStalemateCondition(false), 120);
+            setTimeout(checkStalemateCondition, 120);
         }
     }
 }
@@ -1467,7 +1643,6 @@ function updateDramaAndProgress() {
     tableau.forEach(col => col.forEach(c => { if (!c.faceUp) faceDownCount++; }));
     const totalInFoundation = foundations.reduce((sum, col) => sum + col.length, 0);
 
-    // 心音＆盤面拍動エンジンの更新
     updateHeartbeatSystem(faceDownCount);
 
     if (progBar && progText) {
@@ -1553,7 +1728,7 @@ function renderBoard() {
         fdContainer.appendChild(cell);
     }
 
-    // 2. めくり札（④ 3枚扇状スライド展開対応）
+    // 2. めくり札
     const wasteSlot = document.getElementById('waste-slot');
     wasteSlot.innerHTML = '';
     wasteSlot.className = 'cell' + (isHintTarget('waste', 0) ? ' hint-highlight' : '');
@@ -1592,7 +1767,7 @@ function renderBoard() {
     }
     justDrewFromStock = false;
 
-    // 3. 山札（⑤ リシャッフル回収アニメーション対応）
+    // 3. 山札
     const stockSlot = document.getElementById('stock-slot');
     stockSlot.innerHTML = '';
     if (stock.length > 0) {
@@ -1601,7 +1776,7 @@ function renderBoard() {
         backCard.className = 'card back' + (justCollectedStock ? ' stock-collected' : '');
         stockSlot.appendChild(backCard);
     } else {
-        stockSlot.className = 'cell empty';
+        stockSlot.className = 'cell empty' + (isHintTarget('stock', 0) ? ' hint-highlight' : '');
     }
     justCollectedStock = false;
 
@@ -1772,13 +1947,10 @@ function resetAllStats() {
     }
 }
 
-// ==========================================
-// ★統合ビジュアルFXエンジン（②着地波紋・スパークル・花火・滝・雨）
-// ==========================================
 let fxAnimationId = null;
 let fxMode = 'none';
 let sparkles = [];
-let ripples = []; // ② 着地時の波紋リング
+let ripples = [];
 let confettiList = [];
 let bouncingCards = [];
 let raindrops = [];
@@ -1793,7 +1965,6 @@ function ensureCanvasSize() {
     return canvas;
 }
 
-// ★② カード着地時のパルス波紋リング発生
 function triggerLandingRipple(area, index) {
     setTimeout(() => {
         let targetEl = null;
@@ -1824,7 +1995,6 @@ function triggerLandingRipple(area, index) {
     }, 20);
 }
 
-// ⑤ 山札リシャッフル回収時のキラキラ
 function triggerStockCollectSparkle() {
     const stockSlot = document.getElementById('stock-slot');
     if (!stockSlot) return;
@@ -1964,7 +2134,6 @@ function fxLoop() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // ② 着地時の波紋リング描画
     for (let i = ripples.length - 1; i >= 0; i--) {
         const r = ripples[i];
         const expandW = r.w * r.scale;
@@ -1990,7 +2159,6 @@ function fxLoop() {
         if (r.alpha <= 0) ripples.splice(i, 1);
     }
 
-    // スパークル描画
     for (let i = sparkles.length - 1; i >= 0; i--) {
         const s = sparkles[i];
         ctx.save();
